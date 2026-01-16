@@ -4,36 +4,46 @@ import com.ansh.portfilio_tracker.Classes.CreatePortfolioRequest;
 import com.ansh.portfilio_tracker.Classes.Portfolio;
 import com.ansh.portfilio_tracker.Classes.Holding;
 import com.ansh.portfilio_tracker.Classes.PortfolioSummary;
+import com.ansh.portfilio_tracker.Classes.UserPortfolio;
 import com.ansh.portfilio_tracker.Repo.HoldingRepository;
-import com.ansh.portfilio_tracker.Repo.PortfolioRepo;
+import com.ansh.portfilio_tracker.Repo.PortfolioRepository;
+import com.ansh.portfilio_tracker.Repo.UserPortfolioRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@Transactional
 public class PortfolioService {
 
-    private final PortfolioRepo portfolioRepo;
+    private final PortfolioRepository portfolioRepository;
+    private final UserPortfolioRepository userPortfolioRepository;
     private final HoldingRepository holdingRepository;
+    private final HoldingService holdingService;
 
     public Portfolio createPortfolio(UUID userId, CreatePortfolioRequest request) {
         Portfolio portfolio = Portfolio.builder()
                 .id(UUID.randomUUID())
                 .name(request.getName())
                 .baseCurrency(request.getBaseCurrency())
+                .realizedProfitInBaseCurrency(BigDecimal.ZERO)
                 .build();
 
-        portfolioRepo.save(portfolio);
+        portfolioRepository.save(portfolio);
+
         if (userId != null) {
-            portfolioRepo.saveUserPortfolio(userId, portfolio.getId());
+            UserPortfolio userPortfolio = UserPortfolio.builder()
+                    .userId(userId)
+                    .portfolioId(portfolio.getId())
+                    .build();
+            userPortfolioRepository.save(userPortfolio);
         }
 
         log.info("Created portfolio {} for user {}", portfolio.getId(), userId);
@@ -46,12 +56,11 @@ public class PortfolioService {
             return List.of();
         }
 
-        Collection<Portfolio> portfolios = portfolioRepo.findByUserId(userId);
-        return portfolios.stream().collect(Collectors.toList());
+        return portfolioRepository.findByUserId(userId);
     }
 
     public Portfolio getPortfolioById(UUID portfolioId) {
-        return portfolioRepo.findById(portfolioId);
+        return portfolioRepository.findById(portfolioId).orElse(null);
     }
 
     public List<Holding> getHoldingsByPortfolio(UUID portfolioId) {
@@ -60,16 +69,17 @@ public class PortfolioService {
             return List.of();
         }
 
-        Collection<Holding> holdings = holdingRepository.findByPortfolioId(portfolioId);
+        List<Holding> holdings = holdingRepository.findByPortfolioId(portfolioId);
 
         // Refresh market prices for all holdings
         holdings.forEach(holding -> {
             if (holding.getSymbol() != null) {
-                holdingRepository.refreshMarketPrice(portfolioId, holding.getSymbol());
+                holdingService.refreshMarketPrice(portfolioId, holding.getSymbol());
             }
         });
 
-        return holdings.stream().collect(Collectors.toList());
+        // Re-fetch to get updated prices
+        return holdingRepository.findByPortfolioId(portfolioId);
     }
 
     public PortfolioSummary getPortfolioSummary(UUID portfolioId) {
@@ -78,7 +88,7 @@ public class PortfolioService {
             return null;
         }
 
-        Portfolio portfolio = portfolioRepo.findById(portfolioId);
+        Portfolio portfolio = portfolioRepository.findById(portfolioId).orElse(null);
         if (portfolio == null) {
             log.warn("Portfolio not found: {}", portfolioId);
             return null;

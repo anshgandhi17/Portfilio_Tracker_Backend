@@ -4,26 +4,30 @@ import com.ansh.portfilio_tracker.Classes.Holding;
 import com.ansh.portfilio_tracker.Classes.Portfolio;
 import com.ansh.portfilio_tracker.Classes.Transaction;
 import com.ansh.portfilio_tracker.Repo.HoldingRepository;
-import com.ansh.portfilio_tracker.Repo.PortfolioRepo;
+import com.ansh.portfilio_tracker.Repo.PortfolioRepository;
 import com.ansh.portfilio_tracker.Repo.TransactionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
-import java.util.Collection;
+import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
+@Transactional
 public class TransactionServiceImpl implements TransactionService {
 
     private final TransactionRepository transactionRepository;
     private final HoldingRepository holdingRepository;
-    private final PortfolioRepo portfolioRepo;
+    private final PortfolioRepository portfolioRepository;
+    private final HoldingService holdingService;
 
     @Override
     public Transaction addTransaction(UUID portfolioId, Transaction transactionRequest) {
@@ -57,9 +61,10 @@ public class TransactionServiceImpl implements TransactionService {
         UUID portfolioId = transaction.getPortfolioId();
         String symbol = transaction.getInstrumentSymbol().toUpperCase();
 
-        Holding holding = holdingRepository.findByPortfolioAndSymbol(portfolioId, symbol);
+        Optional<Holding> holdingOpt = holdingRepository.findByPortfolioIdAndSymbol(portfolioId, symbol);
 
-        if (holding == null) {
+        Holding holding;
+        if (holdingOpt.isEmpty()) {
             // Create new holding
             holding = Holding.builder()
                     .portfolioId(portfolioId)
@@ -71,6 +76,7 @@ public class TransactionServiceImpl implements TransactionService {
             log.info("Created new holding for {}", symbol);
         } else {
             // Update existing holding with weighted average cost
+            holding = holdingOpt.get();
             BigDecimal currentValue = holding.getQuantity().multiply(holding.getAvgPriceInBaseCurrency());
             BigDecimal newValue = transaction.getQuantity().multiply(transaction.getPricePerUnit());
             BigDecimal totalQuantity = holding.getQuantity().add(transaction.getQuantity());
@@ -82,18 +88,20 @@ public class TransactionServiceImpl implements TransactionService {
         }
 
         holdingRepository.save(holding);
-        holdingRepository.refreshMarketPrice(portfolioId, symbol);
+        holdingService.refreshMarketPrice(portfolioId, symbol);
     }
 
     private void executeSell(Transaction transaction) {
         UUID portfolioId = transaction.getPortfolioId();
         String symbol = transaction.getInstrumentSymbol().toUpperCase();
 
-        Holding holding = holdingRepository.findByPortfolioAndSymbol(portfolioId, symbol);
+        Optional<Holding> holdingOpt = holdingRepository.findByPortfolioIdAndSymbol(portfolioId, symbol);
 
-        if (holding == null) {
+        if (holdingOpt.isEmpty()) {
             throw new IllegalStateException("Cannot sell " + symbol + ": No holding found in portfolio");
         }
+
+        Holding holding = holdingOpt.get();
 
         if (holding.getQuantity().compareTo(transaction.getQuantity()) < 0) {
             throw new IllegalStateException("Cannot sell " + transaction.getQuantity() + " shares of " + symbol +
@@ -108,13 +116,14 @@ public class TransactionServiceImpl implements TransactionService {
         transaction.setRealizedProfit(realizedProfit);
 
         // Update portfolio's realized profit
-        Portfolio portfolio = portfolioRepo.findById(portfolioId);
-        if (portfolio != null) {
+        Optional<Portfolio> portfolioOpt = portfolioRepository.findById(portfolioId);
+        if (portfolioOpt.isPresent()) {
+            Portfolio portfolio = portfolioOpt.get();
             BigDecimal currentRealizedProfit = portfolio.getRealizedProfitInBaseCurrency() != null
                     ? portfolio.getRealizedProfitInBaseCurrency()
                     : BigDecimal.ZERO;
             portfolio.setRealizedProfitInBaseCurrency(currentRealizedProfit.add(realizedProfit));
-            portfolioRepo.save(portfolio);
+            portfolioRepository.save(portfolio);
             log.info("Updated portfolio realized profit: {} (added {})",
                     portfolio.getRealizedProfitInBaseCurrency(), realizedProfit);
         }
@@ -124,28 +133,28 @@ public class TransactionServiceImpl implements TransactionService {
 
         if (newQuantity.compareTo(BigDecimal.ZERO) == 0) {
             // Delete holding when quantity reaches zero
-            holdingRepository.delete(portfolioId, symbol);
+            holdingRepository.deleteByPortfolioIdAndSymbol(portfolioId, symbol);
             log.info("Deleted holding for {} as quantity reached zero", symbol);
         } else {
             // Only save and refresh if holding still exists
             holding.setQuantity(newQuantity);
             holdingRepository.save(holding);
-            holdingRepository.refreshMarketPrice(portfolioId, symbol);
+            holdingService.refreshMarketPrice(portfolioId, symbol);
         }
 
         log.info("Sold {} shares of {} at ${}, realized profit: {}",
                 transaction.getQuantity(), symbol, transaction.getPricePerUnit(), realizedProfit);
     }
 
-    public Collection<Transaction> getPortfolioTransactions(UUID portfolioId) {
-        return transactionRepository.findByPortfolioId(portfolioId);
+    public List<Transaction> getPortfolioTransactions(UUID portfolioId) {
+        return transactionRepository.findByPortfolioIdOrderByTransactionDateDesc(portfolioId);
     }
 
-    public Collection<Transaction> getTransactionsBySymbol(UUID portfolioId, String symbol) {
-        return transactionRepository.findByPortfolioIdAndSymbol(portfolioId, symbol);
+    public List<Transaction> getTransactionsBySymbol(UUID portfolioId, String symbol) {
+        return transactionRepository.findByPortfolioIdAndInstrumentSymbol(portfolioId, symbol);
     }
 
     public Transaction getTransaction(UUID transactionId) {
-        return transactionRepository.findById(transactionId);
+        return transactionRepository.findById(transactionId).orElse(null);
     }
 }

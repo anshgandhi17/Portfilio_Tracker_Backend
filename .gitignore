@@ -31,3 +31,12 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Sensitive Configuration ###
+# Local configuration with actual credentials (not committed)
+**/application-local.properties
+.env
+
+# Keep example files
+!**/application-local.properties.example
+!.env.example

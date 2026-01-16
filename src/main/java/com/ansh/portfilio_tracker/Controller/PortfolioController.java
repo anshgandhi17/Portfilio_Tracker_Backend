@@ -19,6 +19,10 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class PortfolioController {
 
+    // TODO: Remove this hardcoded user ID once authentication is implemented
+    // Currently using a fixed user ID for all operations
+    private static final UUID DEFAULT_USER_ID = UUID.fromString("00000000-0000-0000-0000-000000000001");
+
     private final PortfolioService portfolioService;
     private final TransactionService transactionService;
 
@@ -26,7 +30,9 @@ public class PortfolioController {
     public ResponseEntity<Portfolio> createPortfolio(
             @RequestParam(required = false) UUID userId,
             @Valid @RequestBody CreatePortfolioRequest request) {
-        Portfolio portfolio = portfolioService.createPortfolio(userId, request);
+        // TODO: Replace with authenticated user ID from security context
+        UUID effectiveUserId = (userId != null) ? userId : DEFAULT_USER_ID;
+        Portfolio portfolio = portfolioService.createPortfolio(effectiveUserId, request);
         return ResponseEntity.status(HttpStatus.CREATED).body(portfolio);
     }
 
@@ -35,6 +41,14 @@ public class PortfolioController {
         List<Portfolio> portfolios = portfolioService.getUserPortfolios(userId);
         return ResponseEntity.ok(portfolios);
     }
+
+    // TODO: Add endpoint to get current user's portfolios without userId parameter
+    // @GetMapping("/my-portfolios")
+    // public ResponseEntity<List<Portfolio>> getMyPortfolios() {
+    //     UUID userId = getCurrentAuthenticatedUserId(); // From security context
+    //     List<Portfolio> portfolios = portfolioService.getUserPortfolios(userId);
+    //     return ResponseEntity.ok(portfolios);
+    // }
 
     @GetMapping("/{portfolioId}")
     public ResponseEntity<Portfolio> getPortfolio(@PathVariable UUID portfolioId) {

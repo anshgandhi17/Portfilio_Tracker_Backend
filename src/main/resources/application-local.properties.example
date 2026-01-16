@@ -1,0 +1,11 @@
+# Local configuration template
+# Copy this file to application-local.properties and fill in your actual values
+# application-local.properties is ignored by git and will override application.properties
+
+# Finnhub API Configuration
+finnhub.api.key=your-finnhub-api-key-here
+
+# Database Configuration
+spring.datasource.url=jdbc:postgresql://localhost:5432/PortfolioDB
+spring.datasource.username=postgres
+spring.datasource.password=your-database-password-here
